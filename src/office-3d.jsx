@@ -17,6 +17,14 @@ import { buildGraph, findPath } from './waypoints.js'
 import { chooseActivity, shouldRedecide } from './behavior.js'
 import { buildPerson, poseSeated, animatePerson, stepAlongPath, turnTowards } from './person.js'
 import { buildNameplate } from './nameplate.js'
+import {
+  OVERVIEW,
+  FLIGHT_SECONDS,
+  MIN_ORBIT_DISTANCE,
+  deskView,
+  easeInOutCubic,
+  lerpPose,
+} from './camera.js'
 
 const COLORS = {
   floor: 0xd9d4cc,
@@ -416,7 +424,7 @@ export default function Office3D() {
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.maxPolarAngle = Math.PI / 2.1
-    controls.minDistance = 6
+    controls.minDistance = MIN_ORBIT_DISTANCE
     controls.maxDistance = 45
     controls.target.set(0, 1, 0)
 
@@ -471,6 +479,7 @@ export default function Office3D() {
         nameplate: group.userData.nameplate,
         agent: null,
         seatNode: nodeId,
+        view: deskView(desk.x, desk.z, desk.rotation),
       })
     }
 
@@ -513,6 +522,34 @@ export default function Office3D() {
       }
       const deskName = mesh ? mesh.userData.deskName : null
       setSelected(deskName && { deskName, agent: stations.get(deskName)?.agent ?? null })
+      flyTo(deskName ? stations.get(deskName).view : OVERVIEW)
+    }
+
+    // Camera flight: hand control back to OrbitControls once it lands.
+    let flight = null
+    const flyTo = (to) => {
+      flight = {
+        from: {
+          position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+          target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+        },
+        to,
+        elapsed: 0,
+      }
+      controls.enabled = false
+    }
+
+    const updateFlight = (delta) => {
+      if (!flight) return
+      flight.elapsed += delta
+      const k = easeInOutCubic(flight.elapsed / FLIGHT_SECONDS)
+      const pose = lerpPose(flight.from, flight.to, k)
+      camera.position.set(pose.position.x, pose.position.y, pose.position.z)
+      controls.target.set(pose.target.x, pose.target.y, pose.target.z)
+      if (flight.elapsed >= FLIGHT_SECONDS) {
+        flight = null
+        controls.enabled = true
+      }
     }
 
     // One person per occupied desk, wandering the floor between tasks.
@@ -691,7 +728,17 @@ export default function Office3D() {
     poll()
     const pollTimer = setInterval(poll, 3000)
 
+    // Orbiting ends in a click event too, so only a press that barely moved counts.
+    let pressAt = null
+    const onPointerDown = (event) => {
+      pressAt = { x: event.clientX, y: event.clientY }
+    }
+
     const onClick = (event) => {
+      const moved = pressAt ? Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) : 0
+      pressAt = null
+      if (moved > 5) return
+
       const rect = renderer.domElement.getBoundingClientRect()
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
@@ -699,6 +746,7 @@ export default function Office3D() {
       const hit = raycaster.intersectObjects(deskTops, false)[0]
       highlight(hit ? hit.object : null)
     }
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
     renderer.domElement.addEventListener('click', onClick)
 
     const onResize = () => {
@@ -729,6 +777,7 @@ export default function Office3D() {
         animatePerson(person, person.mode, now)
       }
 
+      updateFlight(delta)
       controls.update()
       renderer.render(scene, camera)
     }
@@ -740,6 +789,7 @@ export default function Office3D() {
       cancelAnimationFrame(frame)
       window.removeEventListener('resize', onResize)
       renderer.domElement.removeEventListener('click', onClick)
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
       controls.dispose()
       highlight(null)
       scene.traverse((obj) => {
