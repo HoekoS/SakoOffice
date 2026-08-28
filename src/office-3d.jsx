@@ -16,6 +16,7 @@ import { seatAgents, statusLook, rosterSummary } from './agents.js'
 import { buildGraph, findPath } from './waypoints.js'
 import { chooseActivity, shouldRedecide } from './behavior.js'
 import { buildPerson, poseSeated, animatePerson, stepAlongPath, turnTowards } from './person.js'
+import { buildNameplate } from './nameplate.js'
 
 const COLORS = {
   floor: 0xd9d4cc,
@@ -151,6 +152,12 @@ function buildDesk(m, desk) {
   }
 
   // buildChair faces +z; the chair sits at +z and the monitors at -z, so turn it around.
+  // Nameplate on the front edge, clear of the monitors.
+  const plate = buildNameplate(desk.name)
+  plate.mesh.position.set(width / 2 - 0.35, 0.84, -0.4)
+  group.add(plate.mesh)
+  group.userData.nameplate = plate
+
   const chair = buildChair(m, desk.main ? m.mainChair : m.chair)
   chair.position.set(0, 0, 0.85)
   chair.rotation.y = Math.PI
@@ -461,6 +468,7 @@ export default function Office3D() {
       }
       stations.set(desk.name, {
         screenMaterial: group.userData.screenMaterial,
+        nameplate: group.userData.nameplate,
         agent: null,
         seatNode: nodeId,
       })
@@ -651,7 +659,9 @@ export default function Office3D() {
     const applyAgents = (agents) => {
       const seating = seatAgents(agents, [...stations.keys()], MAIN_DESK_NAME)
       for (const [deskName, station] of stations) {
+        const previous = station.agent
         station.agent = seating.get(deskName) ?? null
+        if (previous?.name !== station.agent?.name) station.nameplate.setLabel(station.agent)
         const look = statusLook(station.agent ? station.agent.status : 'empty')
         station.screenMaterial.emissive.setHex(look.color)
         station.screenMaterial.emissiveIntensity = look.intensity
@@ -736,7 +746,10 @@ export default function Office3D() {
         if (obj.isMesh) obj.geometry.dispose()
       })
       Object.values(materials).forEach((mat) => mat.dispose())
-      stations.forEach((station) => station.screenMaterial.dispose())
+      stations.forEach((station) => {
+        station.screenMaterial.dispose()
+        station.nameplate.dispose()
+      })
       people.forEach((person) => person.materials.forEach((material) => material.dispose()))
       renderer.dispose()
       mount.removeChild(renderer.domElement)
