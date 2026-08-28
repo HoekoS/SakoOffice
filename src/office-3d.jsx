@@ -445,7 +445,20 @@ export default function Office3D() {
       const seat = new THREE.Vector3()
       chair.getWorldPosition(seat)
       const nodeId = `seat:${desk.name}`
-      spots.set(nodeId, { x: seat.x, z: seat.z, heading: desk.rotation + Math.PI, sit: true })
+      const heading = desk.rotation + Math.PI
+      spots.set(nodeId, { x: seat.x, z: seat.z, heading, sit: true })
+
+      // Standing room either side of the chair, where subagents gather.
+      const asideX = Math.cos(heading)
+      const asideZ = -Math.sin(heading)
+      for (const [i, side] of [-1, 1].entries()) {
+        spots.set(`huddle:${desk.name}:${i}`, {
+          x: seat.x + asideX * side * 1.15,
+          z: seat.z + asideZ * side * 1.15,
+          heading,
+          sit: false,
+        })
+      }
       stations.set(desk.name, {
         screenMaterial: group.userData.screenMaterial,
         agent: null,
@@ -470,7 +483,7 @@ export default function Office3D() {
       }))
     )
     const officeNodes = [...graph.nodes.values()].filter(
-      (node) => node.area === 'office' && !node.id.startsWith('seat:')
+      (node) => node.area === 'office' && !node.id.startsWith('seat:') && !node.id.startsWith('huddle:')
     )
     const pointOf = (nodeId) => spots.get(nodeId) ?? graph.nodes.get(nodeId)
 
@@ -499,7 +512,7 @@ export default function Office3D() {
     const claims = new Map() // node id -> desk name, so two people never share a seat
 
     const release = (person) => {
-      if (person.claim && claims.get(person.claim) === person.deskName) claims.delete(person.claim)
+      if (person.claim && claims.get(person.claim) === person.key) claims.delete(person.claim)
       person.claim = null
     }
 
@@ -510,8 +523,17 @@ export default function Office3D() {
       return null
     }
 
+    /** Subagents shadow whoever spawned them: beside the desk, or into the meeting. */
+    const followMode = (person) =>
+      people.get(person.parentDesk)?.kind === 'meeting' ? 'meeting' : 'home'
+
     /** Where the chosen activity wants this person to be. */
     const targetFor = (person, kind) => {
+      if (person.parentDesk) {
+        return followMode(person) === 'meeting'
+          ? (freeSpot('mseat:') ?? person.homeNode)
+          : person.homeNode
+      }
       if (kind === 'desk') return person.homeNode
       if (kind === 'meeting') return freeSpot('mseat:') ?? person.homeNode
       if (kind === 'pantry') return freeSpot('pseat:') ?? 'pantry:counter'
@@ -532,14 +554,18 @@ export default function Office3D() {
 
     const decide = (person, status, now) => {
       release(person)
-      const { kind, duration } = chooseActivity(status)
+      // Subagents don't get a life of their own; they check on their agent often.
+      const { kind, duration } = person.parentDesk
+        ? { kind: 'follow', duration: 8 + Math.random() * 6 }
+        : chooseActivity(status)
       person.status = status
       person.kind = kind
       person.duration = duration
 
       const goal = targetFor(person, kind)
       person.goal = goal
-      if (goal !== person.at && spots.has(goal)) claims.set(goal, person.deskName)
+      person.follows = person.parentDesk ? followMode(person) : null
+      if (goal !== person.at && spots.has(goal)) claims.set(goal, person.key)
       person.claim = spots.has(goal) ? goal : null
 
       if (goal === person.at) {
@@ -555,39 +581,43 @@ export default function Office3D() {
       person.path = route.slice(1).map((id) => pointOf(id))
       person.pathIndex = 0
       person.mode = 'walk'
+      // The clock only starts once they get there; arriving sets the deadline.
+      person.busyUntil = Infinity
       poseSeated(person, false)
     }
 
-    const addPerson = (deskName, agent) => {
-      const station = stations.get(deskName)
-      const rig = buildPerson(agent.sessionId)
-      const spot = pointOf(station.seatNode)
+    const addPerson = (key, deskName, agent, { parentDesk = null, index = 0 } = {}) => {
+      const homeNode = parentDesk ? `huddle:${deskName}:${index}` : stations.get(deskName).seatNode
+      const rig = buildPerson(parentDesk ? `${agent.sessionId}#${index}` : agent.sessionId)
+      const spot = pointOf(homeNode)
       rig.root.position.set(spot.x, 0, spot.z)
       rig.root.rotation.y = spot.heading
-      poseSeated(rig, true)
+      poseSeated(rig, Boolean(spot.sit))
+      if (parentDesk) rig.root.scale.setScalar(0.85)
       scene.add(rig.root)
 
       Object.assign(rig, {
+        key,
         deskName,
-        homeNode: station.seatNode,
-        at: station.seatNode,
-        goal: station.seatNode,
-        claim: null,
-        kind: 'desk',
-        mode: 'type',
+        parentDesk,
+        homeNode,
+        at: homeNode,
+        goal: homeNode,
+        claim: homeNode,
+        kind: parentDesk ? 'follow' : 'desk',
+        mode: spot.sit ? 'type' : 'stand',
         status: agent.status,
         busyUntil: 0,
         duration: 0,
         path: [],
         pathIndex: 0,
       })
-      claims.set(station.seatNode, deskName)
-      rig.claim = station.seatNode
-      people.set(deskName, rig)
+      claims.set(homeNode, key)
+      people.set(key, rig)
     }
 
-    const removePerson = (deskName) => {
-      const person = people.get(deskName)
+    const removePerson = (key) => {
+      const person = people.get(key)
       if (!person) return
       release(person)
       scene.remove(person.root)
@@ -595,7 +625,26 @@ export default function Office3D() {
         if (obj.isMesh) obj.geometry.dispose()
       })
       person.materials.forEach((material) => material.dispose())
-      people.delete(deskName)
+      people.delete(key)
+    }
+
+    /** Desk gets one person for the agent plus one per running subagent. */
+    const HUDDLE_SPACES = 2
+    const syncPeople = (deskName, agent) => {
+      const wanted = new Set()
+      if (agent) {
+        wanted.add(deskName)
+        const helpers = Math.min(agent.subagents ?? 0, HUDDLE_SPACES)
+        for (let i = 0; i < helpers; i++) wanted.add(`${deskName}#${i}`)
+      }
+      for (const key of [...people.keys()]) {
+        if ((key === deskName || key.startsWith(`${deskName}#`)) && !wanted.has(key)) removePerson(key)
+      }
+      for (const key of wanted) {
+        if (people.has(key)) continue
+        const index = key.includes('#') ? Number(key.split('#')[1]) : 0
+        addPerson(key, deskName, agent, { parentDesk: key.includes('#') ? deskName : null, index })
+      }
     }
 
     // Live Claude sessions drive the screens: one session per desk.
@@ -607,8 +656,7 @@ export default function Office3D() {
         station.screenMaterial.emissive.setHex(look.color)
         station.screenMaterial.emissiveIntensity = look.intensity
 
-        if (station.agent && !people.has(deskName)) addPerson(deskName, station.agent)
-        if (!station.agent && people.has(deskName)) removePerson(deskName)
+        syncPeople(deskName, station.agent)
       }
       setRoster(agents)
       setSelected((prev) =>
@@ -659,12 +707,14 @@ export default function Office3D() {
 
       for (const person of people.values()) {
         const status = stations.get(person.deskName).agent?.status ?? 'away'
-        if (person.mode === 'walk') {
-          if (stepAlongPath(person, delta)) arrive(person, now)
-        } else if (shouldRedecide(person, status, now)) {
+        // A plan can go stale at any moment — the agent started working, or a
+        // subagent's parent left for a meeting. React now, don't finish the trip.
+        const followStale = person.parentDesk && person.follows !== followMode(person)
+
+        if (followStale || shouldRedecide(person, status, now)) {
           decide(person, status, now)
-        } else if (person.mode === 'stand') {
-          turnTowards(person, person.root.rotation.y, delta)
+        } else if (person.mode === 'walk') {
+          if (stepAlongPath(person, delta)) arrive(person, now)
         }
         animatePerson(person, person.mode, now)
       }
@@ -724,6 +774,12 @@ export default function Office3D() {
                 </div>
                 <div>{selected.agent.project}</div>
                 <div>active {since(selected.agent.lastActive)}</div>
+                {selected.agent.subagents > 0 && (
+                  <div>
+                    {selected.agent.subagents} subagent
+                    {selected.agent.subagents === 1 ? '' : 's'} running
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ marginTop: 4, opacity: 0.6 }}>Empty desk</div>

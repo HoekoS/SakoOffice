@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { countActiveSubagents } from './subagents.js'
 
 export const CLAUDE_DIR = path.join(os.homedir(), '.claude')
 
@@ -70,8 +71,10 @@ export function readAgents({
 
     const transcript = path.join(dir, 'projects', projectSlug(session.cwd), `${session.sessionId}.jsonl`)
     let lastActive = session.startedAt ?? 0
+    let subagents = 0
     try {
       lastActive = Math.max(lastActive, fs.statSync(transcript).mtimeMs)
+      subagents = countActiveSubagents(transcript, now)
     } catch {
       // No transcript yet — the session has only just started.
     }
@@ -87,6 +90,7 @@ export function readAgents({
       lastActive,
       status: statusFor(lastActive, now),
       isMain: samePath(session.cwd, workspace),
+      subagents,
     })
   }
 
