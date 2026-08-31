@@ -1,0 +1,32 @@
+# The container has to run on the same machine as Claude Code: it reads the
+# session files off that machine's disk. Mounted read-only — this only ever reads.
+#
+# Run it from WSL, where the Windows home shows up under /mnt/c:
+#
+#   cd /mnt/c/Users/<you>/Documents/Data/Projek/SakoOffice
+#   docker compose up --build          then open http://localhost:3000
+#
+# Both values below default to this machine. Override them in a .env file next
+# to this one if your paths differ:
+#
+#   CLAUDE_HOME=/mnt/c/Users/<you>/.claude
+#   SAKO_WORKSPACE=C:\Users\<you>\Documents\Data\Projek\SakoOffice
+#
+# SAKO_WORKSPACE is a *Windows* path on purpose: it is matched against the `cwd`
+# Claude Code writes into its session files, which is the path as Windows sees
+# it. Get it wrong and the office still works — no session just claims the main
+# desk.
+
+services:
+  sako-office:
+    build: .
+    ports:
+      - '3000:3000'
+    volumes:
+      - ${CLAUDE_HOME:-/mnt/c/Users/Formulatrix/.claude}:/claude:ro
+    environment:
+      SAKO_CLAUDE_DIR: /claude
+      SAKO_WORKSPACE: ${SAKO_WORKSPACE:-C:\Users\Formulatrix\Documents\Data\Projek\SakoOffice}
+      # Host pids do not exist in here, so liveness comes from file age instead.
+      SAKO_CHECK_PIDS: '0'
+    restart: unless-stopped

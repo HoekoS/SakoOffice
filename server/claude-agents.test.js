@@ -77,6 +77,29 @@ test('the session running in the workspace is flagged as the main agent', () => 
   )
 })
 
+test('without pid checks, stale session files are dropped on age', () => {
+  const cwd = 'C:\\work\\alpha'
+  // A real epoch: file mtimes ten hours back have to stay above zero.
+  const now = Date.parse('2026-08-29T10:00:00.000Z')
+  const dir = fixture(
+    {
+      1: { pid: 1, sessionId: 'fresh', cwd, startedAt: 1, name: 'fresh' },
+      2: { pid: 2, sessionId: 'stale', cwd, startedAt: 2, name: 'stale' },
+    },
+    {
+      fresh: { cwd, mtime: now - 60_000 },
+      stale: { cwd, mtime: now - 10 * 60 * 60_000 },
+    }
+  )
+
+  // Every pid "alive", as it looks from inside a container reading a mount.
+  const all = readAgents({ dir, now, isAlive: () => true })
+  assert.deepEqual(all.map((a) => a.name), ['fresh', 'stale'])
+
+  const recent = readAgents({ dir, now, isAlive: () => true, maxIdleMs: 6 * 60 * 60_000 })
+  assert.deepEqual(recent.map((a) => a.name), ['fresh'])
+})
+
 test('a session with no transcript yet falls back to its start time', () => {
   const dir = fixture({
     77: { pid: 77, sessionId: 'zzz', cwd: 'C:\\work\\beta', startedAt: 4_000, name: 'fresh' },

@@ -42,13 +42,16 @@ export function samePath(a, b) {
 /**
  * One entry per live session, oldest first.
  * The session running in `workspace` is the main agent — it gets the main desk.
- * `isAlive` is injectable so tests don't depend on real pids.
+ * `isAlive` is injectable so tests don't depend on real pids, and so a reader
+ * looking at another machine's .claude (a container mount) can skip the check
+ * and lean on `maxIdleMs` instead.
  */
 export function readAgents({
   dir = CLAUDE_DIR,
   now = Date.now(),
   isAlive = pidAlive,
   workspace = process.cwd(),
+  maxIdleMs = Infinity,
 } = {}) {
   const sessionsDir = path.join(dir, 'sessions')
   let files = []
@@ -79,6 +82,10 @@ export function readAgents({
     } catch {
       // No transcript yet — the session has only just started.
     }
+
+    // Without a pid check (reading someone else's .claude, e.g. a mounted host
+    // directory), a stale session file is the only thing left to filter on.
+    if (now - lastActive > maxIdleMs) continue
 
     agents.push({
       sessionId: session.sessionId,
