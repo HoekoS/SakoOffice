@@ -6,11 +6,13 @@
 #   cd /mnt/c/Users/<you>/Documents/Data/Projek/SakoOffice
 #   docker compose up --build          then open http://localhost:3000
 #
-# Both values below default to this machine. Override them in a .env file next
-# to this one if your paths differ:
+# Machine-specific paths live in a .env file next to this one (gitignored):
 #
 #   CLAUDE_HOME=/mnt/c/Users/<you>/.claude
 #   SAKO_WORKSPACE=C:\Users\<you>\Documents\Data\Projek\SakoOffice
+#
+# CLAUDE_HOME defaults to $HOME/.claude, which is right for Docker on plain
+# Linux or macOS but not for WSL, where Claude Code runs on the Windows side.
 #
 # SAKO_WORKSPACE is a *Windows* path on purpose: it is matched against the `cwd`
 # Claude Code writes into its session files, which is the path as Windows sees
@@ -23,10 +25,10 @@ services:
     ports:
       - '3000:3000'
     volumes:
-      - ${CLAUDE_HOME:-/mnt/c/Users/Formulatrix/.claude}:/claude:ro
+      - ${CLAUDE_HOME:-${HOME}/.claude}:/claude:ro
     environment:
       SAKO_CLAUDE_DIR: /claude
-      SAKO_WORKSPACE: ${SAKO_WORKSPACE:-C:\Users\Formulatrix\Documents\Data\Projek\SakoOffice}
+      SAKO_WORKSPACE: ${SAKO_WORKSPACE:-}
       # Host pids do not exist in here, so liveness comes from file age instead.
       SAKO_CHECK_PIDS: '0'
     restart: unless-stopped
