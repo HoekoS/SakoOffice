@@ -26,12 +26,8 @@ export function readTail(file, bytes = TAIL_BYTES) {
   }
 }
 
-/**
- * How many subagent chains have run inside `windowMs`.
- * Chains whose start scrolled out of the tail still count — an entry with an
- * unknown parent is treated as its own root.
- */
-export function countActiveSubagents(file, now = Date.now(), windowMs = SUBAGENT_WINDOW_MS) {
+/** For each subagent chain in the file's tail, the timestamp it was last active. */
+export function chainLastSeen(file) {
   const sidechain = new Map()
   for (const line of readTail(file).split('\n')) {
     if (!line.includes('"isSidechain":true')) continue
@@ -55,10 +51,36 @@ export function countActiveSubagents(file, now = Date.now(), windowMs = SUBAGENT
     if (Number.isNaN(at)) continue
     lastSeen.set(root.uuid, Math.max(lastSeen.get(root.uuid) ?? 0, at))
   }
+  return lastSeen
+}
 
+function countFromLastSeen(lastSeen, now, windowMs) {
   let active = 0
   for (const at of lastSeen.values()) {
     if (now - at < windowMs) active += 1
   }
   return active
+}
+
+/**
+ * How many subagent chains have run inside `windowMs`.
+ * Chains whose start scrolled out of the tail still count — an entry with an
+ * unknown parent is treated as its own root.
+ */
+export function countActiveSubagents(file, now = Date.now(), windowMs = SUBAGENT_WINDOW_MS) {
+  return countFromLastSeen(chainLastSeen(file), now, windowMs)
+}
+
+// Re-parsing the tail is the expensive part (disk read + JSON.parse per line).
+// A transcript's content is fully determined by its mtime, so skip the reparse
+// when nothing has changed since the last poll — the count itself still decays
+// every call, since that only depends on `now`.
+const tailCache = new Map() // file -> { mtimeMs, lastSeen }
+
+/** Same as countActiveSubagents, but skips the reparse when `mtimeMs` is unchanged. */
+export function countActiveSubagentsCached(file, mtimeMs, now = Date.now(), windowMs = SUBAGENT_WINDOW_MS) {
+  const cached = tailCache.get(file)
+  const lastSeen = cached && cached.mtimeMs === mtimeMs ? cached.lastSeen : chainLastSeen(file)
+  tailCache.set(file, { mtimeMs, lastSeen })
+  return countFromLastSeen(lastSeen, now, windowMs)
 }

@@ -32,6 +32,15 @@ function draw(canvas, label, occupied) {
  * A small standing plate for the front edge of a desk.
  * Returns the mesh plus `setLabel` and `dispose`.
  */
+/**
+ * Turn a plate to face the camera. For a plain mesh (unlike a camera or
+ * light) Object3D.lookAt() points local +Z at the target, which is exactly
+ * the side a plane's texture reads correctly from — no extra flip needed.
+ */
+export function billboardNameplate(mesh, cameraPosition) {
+  mesh.lookAt(cameraPosition)
+}
+
 export function buildNameplate(deskName) {
   const canvas = document.createElement('canvas')
   canvas.width = WIDTH
@@ -43,10 +52,9 @@ export function buildNameplate(deskName) {
   texture.anisotropy = 4
 
   const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true })
+  // Billboarded toward the camera every frame (see billboardNameplate) — a fixed
+  // rotation would leave it unreadable from half the room.
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.125), material)
-  // Faces away from whoever sits here — nameplates are for the room to read.
-  mesh.rotation.y = Math.PI
-  mesh.rotation.x = 0.18
 
   return {
     mesh,

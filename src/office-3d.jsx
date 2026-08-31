@@ -16,7 +16,7 @@ import { seatAgents, statusLook, rosterSummary } from './agents.js'
 import { buildGraph, findPath } from './waypoints.js'
 import { chooseActivity, shouldRedecide } from './behavior.js'
 import { buildPerson, poseSeated, animatePerson, stepAlongPath, turnTowards } from './person.js'
-import { buildNameplate } from './nameplate.js'
+import { buildNameplate, billboardNameplate } from './nameplate.js'
 import {
   OVERVIEW,
   FLIGHT_SECONDS,
@@ -746,8 +746,17 @@ export default function Office3D() {
       const hit = raycaster.intersectObjects(deskTops, false)[0]
       highlight(hit ? hit.object : null)
     }
+    const onMouseMove = (event) => {
+      const rect = renderer.domElement.getBoundingClientRect()
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.setFromCamera(pointer, camera)
+      const hovering = raycaster.intersectObjects(deskTops, false).length > 0
+      renderer.domElement.style.cursor = hovering ? 'pointer' : 'auto'
+    }
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
     renderer.domElement.addEventListener('click', onClick)
+    renderer.domElement.addEventListener('mousemove', onMouseMove)
 
     const onResize = () => {
       camera.aspect = mount.clientWidth / mount.clientHeight
@@ -777,6 +786,10 @@ export default function Office3D() {
         animatePerson(person, person.mode, now)
       }
 
+      for (const station of stations.values()) {
+        billboardNameplate(station.nameplate.mesh, camera.position)
+      }
+
       updateFlight(delta)
       controls.update()
       renderer.render(scene, camera)
@@ -790,6 +803,7 @@ export default function Office3D() {
       window.removeEventListener('resize', onResize)
       renderer.domElement.removeEventListener('click', onClick)
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      renderer.domElement.removeEventListener('mousemove', onMouseMove)
       controls.dispose()
       highlight(null)
       scene.traverse((obj) => {

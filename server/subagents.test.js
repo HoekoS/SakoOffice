@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { countActiveSubagents, readTail } from './subagents.js'
+import { countActiveSubagents, countActiveSubagentsCached, readTail } from './subagents.js'
 
 const NOW = Date.parse('2026-08-29T10:00:00.000Z')
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString()
@@ -64,6 +64,26 @@ test('a chain that went quiet drops out of the window', () => {
 test('a chain whose start scrolled out of the tail still counts once', () => {
   const file = transcript([side('orphan1', 'long-gone', 20), side('orphan2', 'orphan1', 10)])
   assert.equal(countActiveSubagents(file, NOW), 1)
+})
+
+test('the cached count decays over time without re-reading an unchanged file', () => {
+  const file = transcript([main('call-a', 80), side('a1', 'call-a', 70)])
+  // Same mtime both calls — the count still has to drop as `now` moves on.
+  const mtime = 12345
+  assert.equal(countActiveSubagentsCached(file, mtime, NOW), 1)
+  assert.equal(countActiveSubagentsCached(file, mtime, NOW + 20_000), 0)
+})
+
+test('a cached result is thrown away once the mtime moves', () => {
+  const file = transcript([main('call-a', 30), side('a1', 'call-a', 20)])
+  assert.equal(countActiveSubagentsCached(file, 1, NOW), 1)
+
+  // Overwrite with no subagents, same mtime as before — the stale cache wins.
+  fs.writeFileSync(file, JSON.stringify(main('call-b', 5)) + '\n')
+  assert.equal(countActiveSubagentsCached(file, 1, NOW), 1)
+
+  // A new mtime forces the reparse, which now sees the emptied file.
+  assert.equal(countActiveSubagentsCached(file, 2, NOW), 0)
 })
 
 test('a missing or unreadable file counts none instead of throwing', () => {
