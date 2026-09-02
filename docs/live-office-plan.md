@@ -233,3 +233,40 @@ file fails in CI, not on screen.
 **Bundle size:** models load at runtime from `public/`, not from the JS
 bundle, so the 731 KB bundle does not grow. The image does; Furniture Kit
 is well under 20 MB.
+
+### Beyond Kenney — where else free models come from
+
+Checked against each site's own pages, not from memory. "GLB out of the
+box" is the deciding column: FBX and Blend need a Blender export step
+before three.js can load them, which is a real cost every time an asset
+changes.
+
+| Source | License | Formats | Office furniture | Animated people | Verdict |
+|---|---|---|---|---|---|
+| **Kenney** | CC0 | **GLB**, FBX, OBJ | Furniture Kit (140), Food Kit | Mini Characters, Animated Characters × 3 (clips as separate FBX for a shared rig) | Furniture: yes. People: unknown until opened. |
+| **Poly Pizza** (poly.pizza) | per model — checked one: CC0 | **GLB/glTF**, FBX | 256 hits for "office desk"; mixes Kenney, Quaternius, Google Poly, community | some | Best for *single* props we are missing — a monitor arm, a coffee machine, a whiteboard. Check the license badge on each model; it is not one license for the site. |
+| **Quaternius** (quaternius.com) | CC0 on older packs; newer ones under their own QAL — no attribution, commercial OK, no redistribution of the raw files | **FBX, OBJ, Blend only** — no GLB on the site itself | Ultimate Furniture (20), Ultimate House Interior (123, home not office), both *untextured* | Ultimate Animated Character Pack (52), Animated Men / Women (4 each), "many animations" — none named | Nice style, but every file needs a Blender → GLB pass, and no page names its clips. Their models do surface on Poly Pizza *as GLB*, which is the easier door in. |
+| **KayKit** (kaylousberg.itch.io) | CC0 | FBX, **glTF** | not their thing | Adventurers pack: rigged, animated; the separate Animations pack lists **Idle, Walk, Run, Wave, Interact, Pick up, Dance…** — no sit, no type | Only CC0 source that *lists* its clips, and the list has no sitting or typing. Same gap as Kenney. |
+| **Mixamo** (Adobe) | Adobe's terms, not CC — free to use in your own projects, needs an Adobe account. *Not verified here: Adobe's FAQ timed out three times.* | FBX / DAE, converted to GLB in Blender | none | rigged characters plus a large library including sitting and typing clips | The only source known to have **typing and sitting** animations. Also the only one that is not CC and not GLB. |
+| Sketchfab | per model (CC0 / CC-BY / …), account to download | glTF | plenty | some | Same "check each model" rule as Poly Pizza, with more friction. |
+
+**What this changes in the plan:**
+
+- **Furniture:** Kenney first, Poly Pizza for the gaps. Both hand us GLB.
+  Quaternius only via Poly Pizza, so we never touch Blender for a chair.
+- **People — the honest position:** no CC0 source we could verify has a
+  *sitting* or *typing* clip. KayKit publishes its list and those are not
+  on it; Kenney and Quaternius do not publish one at all. Mixamo has them
+  but on Adobe's terms and through FBX. So the three real options are:
+  1. keep our own rig and posing code (`src/person.js`) — it already sits,
+     types, walks and stands, and costs nothing;
+  2. borrow a CC0 body for its *look* and keep driving it with our poses,
+     which works only if its rig has hip/knee/shoulder bones we can rotate;
+  3. Mixamo characters + clips, converted once — the best motion, the
+     most ceremony, and a license to read first.
+  Recommendation: 1 now, 2 when a downloaded pack proves it has the bones,
+  3 only if you want it to look like a game rather than a diorama.
+
+**Not settled by this research:** which clips Kenney's Mini Characters
+ships, and Mixamo's current terms. Both are one download away and neither
+blocks the furniture work.
