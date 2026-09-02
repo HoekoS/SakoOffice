@@ -147,6 +147,8 @@ colour today and a mismatch reads as a seam at the horizon).
 2. **Bubbles** — proves the event stream end to end with something visible.
 3. **Door** — needs `SessionStart`/`SessionEnd` to fire.
 4. **Day/night** — independent, can land any time.
+5. **Kenney models** (below) — furniture any time; people only once a pack
+   has been opened and its animation clips are known.
 
 ## Risks
 
@@ -159,4 +161,75 @@ colour today and a mismatch reads as a seam at the horizon).
   400ms cap; if that shows up as lag, the fix is a persistent listener, not a
   faster hook.
 - **Port coupling.** The hook posts to `SAKO_OFFICE_PORTS` (default
-  `3000,5173`). Your container publishes 8081, so that needs adding.
+  `3000,5173,8081` — the container port is already in).
+
+---
+
+## Slice 5 — Real models from Kenney
+
+**Status: not started.** Added after slices 1–4 were planned; it does not
+block any of them and can land alongside 3 and 4.
+
+Everything in the room today is a box with a colour. Kenney's 3D packs are
+free, CC0 (no attribution required, though we will credit anyway), and ship
+as **GLB** next to FBX and OBJ — GLB is the one we want: three.js loads it
+with `GLTFLoader` from `three/examples/jsm`, which is already installed. No
+new dependency, no build step, no converter.
+
+What the site actually offers (checked, not guessed — Kenney has no "office
+kit"):
+
+| Pack | Use here | Notes |
+|---|---|---|
+| **Furniture Kit** (2018, 140 files) | desks, chairs, the meeting table, pantry counter, plants | tags: furniture, interior, table, chair, bed. The one pack that covers most of the room. |
+| **Food Kit** | mugs, the coffee machine, pantry clutter | small props; pantry only |
+| **Mini Characters** (2024, animated) | the people | tagged character / people / disability; animated, but *which* clips is not listed on the page |
+| **Animated Characters Protagonists / Retro / Survivors** (2020) | alternative people | animations arrive as **separate FBX files** (`idle.fbx`, …) meant for a shared `characterMedium` rig — a Unity/Unreal workflow, not a drop-in GLB |
+| Blocky Characters | alternative people | animated, 20 files |
+| City Kit (Suburban / Commercial), Modular Buildings | exterior for slice 3's door, if we want a street outside | optional |
+
+**Order of attack — furniture first, people last:**
+
+1. **Furniture.** Swap `buildDesk`, `buildChair`, `buildMonitor`, `buildPlant`
+   and the pantry pieces for loaded GLBs. `layout.js` does not change: it
+   already owns every position and heading, and the models just stand where
+   the boxes stood. Keep the box builders as the fallback while a model is
+   still loading (and for any piece the kit does not have — a two-monitor
+   arm, for instance).
+2. **Pantry props** from Food Kit.
+3. **People.** This is the risky one and the reason it goes last. Our person
+   is a hand-made rig (`src/person.js`): pivot groups posed in code for
+   walk / type / sit / stand, which is exactly what the office needs and
+   exactly what a downloaded character may not provide. Mini Characters is
+   the candidate — it is recent and animated — but the page does not say
+   whether it has a *sitting* pose, and no Kenney character types. Until a
+   downloaded pack is opened and its clips listed, this stays a plan, not a
+   promise. If it lacks sit/type, we keep our rig and only borrow its look.
+
+**Where files go:** `public/models/<pack>/…` with the pack's own `Textures`
+folder beside it (Kenney's guide is explicit that colours go missing without
+it). Vite copies `public/` into `dist/`, so the Docker image picks them up
+through the existing `COPY dist ./dist` with no Dockerfile change.
+
+**What has to stay true:**
+
+- Clicking a desk still works: `deskTops` raycasts against the top mesh —
+  after the swap it raycasts against the loaded group, with `userData.deskName`
+  on it. One line moves.
+- Seats stay where `layout.js` says, not where a model's origin happens to be.
+  Kenney models are origin-at-base but the seat point of a chair is not the
+  origin; `spots` keep coming from layout, not from geometry.
+- Loading is async. The scene must render with boxes at t=0 and swap when a
+  model arrives, or wait behind a loader — swap is the lazier and the nicer.
+- Every model is CC0, but a `CREDITS.md` naming Kenney costs one file and is
+  the decent thing.
+
+**Test:** `layout.js` and `waypoints.js` are untouched, so their tests are
+the regression net. Add one that loads each GLB in node (GLTFLoader runs
+under node with a `FileReader` shim, or simply check the files exist and
+parse as valid glTF JSON headers) so a missing texture folder or a renamed
+file fails in CI, not on screen.
+
+**Bundle size:** models load at runtime from `public/`, not from the JS
+bundle, so the 731 KB bundle does not grow. The image does; Furniture Kit
+is well under 20 MB.
