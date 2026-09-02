@@ -32,10 +32,21 @@ export function statusFor(lastActive, now) {
   return 'away'
 }
 
-/** Windows paths differ in case and trailing slash but mean the same folder. */
+// Session files carry the path as the *recording* machine saw it, which for a
+// Linux container reading a mounted Windows .claude means backslashes that
+// node:path (posix there) does not treat as separators at all. Both helpers
+// below therefore split on either separator rather than using node:path.
+
+/** Last segment of a path, whichever slash the machine that wrote it used. */
+export function baseName(p) {
+  const parts = String(p).split(/[\\/]+/).filter(Boolean)
+  return parts[parts.length - 1] ?? String(p)
+}
+
+/** Paths differing only in case, slash style or a trailing slash are the same. */
 export function samePath(a, b) {
   if (!a || !b) return false
-  const clean = (p) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase()
+  const clean = (p) => String(p).replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase()
   return clean(a) === clean(b)
 }
 
@@ -91,7 +102,7 @@ export function readAgents({
       sessionId: session.sessionId,
       name: session.name ?? session.sessionId.slice(0, 8),
       cwd: session.cwd,
-      project: path.basename(session.cwd),
+      project: baseName(session.cwd),
       kind: session.kind ?? 'interactive',
       entrypoint: session.entrypoint ?? 'unknown',
       startedAt: session.startedAt ?? 0,

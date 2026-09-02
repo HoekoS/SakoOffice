@@ -1,5 +1,8 @@
 node_modules
-dist
 .git
 .claude
+.env
+src
+index.html
+vite.config.js
 *.test.js

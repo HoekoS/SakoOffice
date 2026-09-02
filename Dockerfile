@@ -1,15 +1,12 @@
-# Build the frontend, then ship it with a dependency-free Node server.
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
+# Ships a pre-built bundle with a dependency-free Node server.
+#
+# Run `npm run build` on the host first — this image deliberately installs
+# nothing. The server is Node stdlib only and the browser bundle already
+# contains three and react, so there is no node_modules to fetch, and the
+# build does not depend on npm registry access at all.
 FROM node:22-alpine
 WORKDIR /app
-# No npm install here: the server is stdlib-only and the bundle is already built.
-COPY --from=build /app/dist ./dist
+COPY dist ./dist
 COPY server ./server
 COPY package.json ./
 ENV NODE_ENV=production PORT=3000

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { readAgents, projectSlug, statusFor } from './claude-agents.js'
+import { readAgents, projectSlug, statusFor, baseName, samePath } from './claude-agents.js'
 
 function fixture(sessions, transcripts = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sako-agents-'))
@@ -26,6 +26,24 @@ test('a Windows project path flattens to its transcript folder name', () => {
     projectSlug('C:\\Users\\Formulatrix\\Documents\\Data\\Projek\\SakoOffice'),
     'C--Users-Formulatrix-Documents-Data-Projek-SakoOffice'
   )
+})
+
+// These two run on whatever platform the tests are on, but the paths they are
+// handed come from the machine that recorded the session — a Linux container
+// reading a mounted Windows .claude sees backslashes and must still cope.
+test('a Windows path yields its folder name, not the whole path', () => {
+  assert.equal(baseName('C:\\Users\\me\\Documents\\RoverDashboard'), 'RoverDashboard')
+  assert.equal(baseName('C:\\Users\\me\\Projek\\SakoOffice\\'), 'SakoOffice')
+  assert.equal(baseName('/home/me/projects/sako-office'), 'sako-office')
+  assert.equal(baseName('SakoOffice'), 'SakoOffice')
+})
+
+test('paths match across case, slash style and a trailing slash', () => {
+  assert.ok(samePath('C:\\work\\HERE', 'C:\\work\\here\\'))
+  assert.ok(samePath('C:\\work\\here', 'C:/work/here'))
+  assert.ok(samePath('/srv/app/', '/srv/app'))
+  assert.ok(!samePath('C:\\work\\here', 'C:\\work\\there'))
+  assert.ok(!samePath('', 'C:\\work\\here'))
 })
 
 test('activity age decides the status', () => {

@@ -4,7 +4,8 @@
 # Run it from WSL, where the Windows home shows up under /mnt/c:
 #
 #   cd /mnt/c/Users/<you>/Documents/Data/Projek/SakoOffice
-#   docker compose up --build          then open http://localhost:3000
+#   npm run build                      the image ships dist/, it does not build it
+#   docker compose up --build          then open http://localhost:8081
 #
 # Machine-specific paths live in a .env file next to this one (gitignored):
 #
@@ -23,10 +24,12 @@ services:
   sako-office:
     build: .
     ports:
-      - '3000:3000'
+      - '8081:8081'
     volumes:
       - ${CLAUDE_HOME:-${HOME}/.claude}:/claude:ro
     environment:
+      # Must match the container side of the port mapping above.
+      PORT: '8081'
       SAKO_CLAUDE_DIR: /claude
       SAKO_WORKSPACE: ${SAKO_WORKSPACE:-}
       # Host pids do not exist in here, so liveness comes from file age instead.
