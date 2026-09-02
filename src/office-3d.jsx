@@ -17,6 +17,8 @@ import { buildGraph, findPath } from './waypoints.js'
 import { chooseActivity, shouldRedecide } from './behavior.js'
 import { buildPerson, poseSeated, animatePerson, stepAlongPath, turnTowards } from './person.js'
 import { buildNameplate, billboardNameplate } from './nameplate.js'
+import { buildBubble } from './bubble.js'
+import { bubbleText, refineStatus } from './activity.js'
 import {
   OVERVIEW,
   FLIGHT_SECONDS,
@@ -639,12 +641,16 @@ export default function Office3D() {
       rig.root.rotation.y = spot.heading
       poseSeated(rig, Boolean(spot.sit))
       if (parentDesk) rig.root.scale.setScalar(0.85)
+      // Only the session's own person speaks; subagents have no hook stream.
+      const bubble = parentDesk ? null : buildBubble()
+      if (bubble) rig.root.add(bubble.mesh)
       scene.add(rig.root)
 
       Object.assign(rig, {
         key,
         deskName,
         parentDesk,
+        bubble,
         homeNode,
         at: homeNode,
         goal: homeNode,
@@ -666,11 +672,57 @@ export default function Office3D() {
       if (!person) return
       release(person)
       scene.remove(person.root)
+      person.bubble?.dispose()
       person.root.traverse((obj) => {
         if (obj.isMesh) obj.geometry.dispose()
       })
       person.materials.forEach((material) => material.dispose())
       people.delete(key)
+    }
+
+    // Live activity from Claude Code hooks, keyed by session id. Polling still
+    // owns the roster; this only sharpens status and puts words in bubbles.
+    const activity = new Map()
+    const effectiveStatus = (station) =>
+      station.agent
+        ? refineStatus(station.agent.status, activity.get(station.agent.sessionId), Date.now())
+        : 'away'
+
+    /** Screen colour and bubble for one desk, from roster plus live activity. */
+    const refreshStation = (deskName) => {
+      const station = stations.get(deskName)
+      const look = statusLook(station.agent ? effectiveStatus(station) : 'empty')
+      station.screenMaterial.emissive.setHex(look.color)
+      station.screenMaterial.emissiveIntensity = look.intensity
+      people.get(deskName)?.bubble?.setText(
+        station.agent ? bubbleText(activity.get(station.agent.sessionId)) : null
+      )
+    }
+
+    const deskOfSession = (sessionId) => {
+      for (const [deskName, station] of stations) {
+        if (station.agent?.sessionId === sessionId) return deskName
+      }
+      return null
+    }
+
+    const stream = new EventSource('/api/stream')
+    stream.onmessage = (message) => {
+      let data
+      try {
+        data = JSON.parse(message.data)
+      } catch {
+        return
+      }
+      if (data.type === 'snapshot') {
+        activity.clear()
+        for (const record of data.activity ?? []) activity.set(record.sessionId, record)
+        for (const deskName of stations.keys()) refreshStation(deskName)
+      } else if (data.type === 'event' && data.activity) {
+        activity.set(data.activity.sessionId, data.activity)
+        const deskName = deskOfSession(data.activity.sessionId)
+        if (deskName) refreshStation(deskName)
+      }
     }
 
     /** Desk gets one person for the agent plus one per running subagent. */
@@ -699,11 +751,8 @@ export default function Office3D() {
         const previous = station.agent
         station.agent = seating.get(deskName) ?? null
         if (previous?.name !== station.agent?.name) station.nameplate.setLabel(station.agent)
-        const look = statusLook(station.agent ? station.agent.status : 'empty')
-        station.screenMaterial.emissive.setHex(look.color)
-        station.screenMaterial.emissiveIntensity = look.intensity
-
         syncPeople(deskName, station.agent)
+        refreshStation(deskName)
       }
       setRoster(agents)
       setSelected((prev) =>
@@ -773,7 +822,7 @@ export default function Office3D() {
       const now = clock.elapsedTime
 
       for (const person of people.values()) {
-        const status = stations.get(person.deskName).agent?.status ?? 'away'
+        const status = effectiveStatus(stations.get(person.deskName))
         // A plan can go stale at any moment — the agent started working, or a
         // subagent's parent left for a meeting. React now, don't finish the trip.
         const followStale = person.parentDesk && person.follows !== followMode(person)
@@ -784,6 +833,7 @@ export default function Office3D() {
           if (stepAlongPath(person, delta)) arrive(person, now)
         }
         animatePerson(person, person.mode, now)
+        if (person.bubble?.mesh.visible) billboardNameplate(person.bubble.mesh, camera.position)
       }
 
       for (const station of stations.values()) {
@@ -798,6 +848,7 @@ export default function Office3D() {
 
     return () => {
       stopped = true
+      stream.close()
       clearInterval(pollTimer)
       cancelAnimationFrame(frame)
       window.removeEventListener('resize', onResize)
@@ -814,7 +865,10 @@ export default function Office3D() {
         station.screenMaterial.dispose()
         station.nameplate.dispose()
       })
-      people.forEach((person) => person.materials.forEach((material) => material.dispose()))
+      people.forEach((person) => {
+        person.bubble?.dispose()
+        person.materials.forEach((material) => material.dispose())
+      })
       renderer.dispose()
       mount.removeChild(renderer.domElement)
     }

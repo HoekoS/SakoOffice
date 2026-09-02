@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readAgents, CLAUDE_DIR, pidAlive } from './claude-agents.js'
+import { createEventHub, readJsonBody } from './events.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(HERE, '..', 'dist')
@@ -64,9 +65,25 @@ function sendFile(res, file) {
   })
 }
 
+const hub = createEventHub()
+
+async function receiveEvent(req, res) {
+  res.setHeader('Content-Type', MIME['.json'])
+  try {
+    const accepted = hub.ingest(await readJsonBody(req))
+    res.statusCode = accepted ? 202 : 400
+    res.end(JSON.stringify({ ok: Boolean(accepted) }))
+  } catch (error) {
+    res.statusCode = 400
+    res.end(JSON.stringify({ error: String(error.message ?? error) }))
+  }
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost')
   if (url.pathname === '/api/agents') return sendAgents(res)
+  if (url.pathname === '/api/event' && req.method === 'POST') return receiveEvent(req, res)
+  if (url.pathname === '/api/stream') return hub.subscribe(req, res)
 
   // Resolve inside dist and confirm it stayed there, so ../ can't escape.
   const requested = path.resolve(DIST, `.${url.pathname}`)
