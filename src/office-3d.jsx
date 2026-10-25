@@ -14,7 +14,7 @@ import {
 } from './layout.js'
 import { seatAgents, statusLook, rosterSummary } from './agents.js'
 import { buildGraph, findPath } from './waypoints.js'
-import { chooseActivity, shouldRedecide } from './behavior.js'
+import { chooseActivity, shouldRedecide, workPose, activityLabel } from './behavior.js'
 import { buildPerson, poseSeated, animatePerson, stepAlongPath, turnTowards } from './person.js'
 import { buildNameplate, billboardNameplate } from './nameplate.js'
 import { buildBubble } from './bubble.js'
@@ -29,29 +29,35 @@ import {
 } from './camera.js'
 
 const COLORS = {
-  floor: 0xd9d4cc,
-  wall: 0xf2efe9,
-  deskTop: 0xb98a5a,
-  metal: 0x8a8f96,
-  chair: 0x37424f,
-  screen: 0x1b2733,
-  screenOn: 0x4da3ff,
-  plant: 0x4f7a44,
-  table: 0xa8744a,
+  floor: 0xe9edf0,
+  wall: 0xfafcfd,
+  deskTop: 0xb98c62,
+  metal: 0x9faab3,
+  chair: 0x71889c,
+  screen: 0x172c3d,
+  screenOn: 0x85caff,
+  plant: 0x71a475,
+  table: 0xc29b73,
   highlight: 0x2f6fed,
   // Main agent's station: darker wood, warmer seat, amber screen.
-  mainDeskTop: 0x4a3b2f,
-  mainChair: 0x8a4b2a,
-  mainScreenOn: 0xffb347,
-  glass: 0xbcd6e0,
-  frame: 0x6b7178,
-  meetingFloor: 0xc7ced6,
-  pantryFloor: 0xe6ded0,
-  counter: 0x8f9498,
-  counterTop: 0x3f4550,
-  cabinet: 0xf0ece6,
-  fridge: 0xd7dbde,
-  sink: 0x2b3138,
+  mainDeskTop: 0x9e704e,
+  mainChair: 0x74899b,
+  mainScreenOn: 0x92d7ff,
+  glass: 0xb8e5ef,
+  frame: 0xc0d2dc,
+  meetingFloor: 0xe5eef2,
+  pantryFloor: 0xf1ede6,
+  counter: 0xe4e9eb,
+  counterTop: 0xb5c5cd,
+  cabinet: 0xfafcfd,
+  fridge: 0xdbe4e9,
+  sink: 0x718c9b,
+  board: 0xf9fcfd,
+  ink: 0x81a0b1,
+  noteBlue: 0xcbe9f5,
+  notePink: 0xf4d9e0,
+  noteYellow: 0xf6e9b7,
+  screenText: 0x8be4f4,
 }
 
 // Shared materials — one instance reused across every mesh of that kind.
@@ -92,6 +98,12 @@ function makeMaterials() {
     cabinet: std(COLORS.cabinet, { roughness: 0.7 }),
     fridge: std(COLORS.fridge, { roughness: 0.35, metalness: 0.45 }),
     sink: std(COLORS.sink, { roughness: 0.25, metalness: 0.6 }),
+    board: std(COLORS.board, { roughness: 0.85 }),
+    ink: std(COLORS.ink, { roughness: 0.9 }),
+    noteBlue: std(COLORS.noteBlue, { roughness: 0.95 }),
+    notePink: std(COLORS.notePink, { roughness: 0.95 }),
+    noteYellow: std(COLORS.noteYellow, { roughness: 0.95 }),
+    screenText: std(COLORS.screenText, { emissive: COLORS.screenText, emissiveIntensity: 0.45 }),
   }
 }
 
@@ -105,13 +117,17 @@ function box(w, h, d, material, x, y, z) {
 
 function buildChair(m, seatMaterial = m.chair) {
   const chair = new THREE.Group()
-  chair.add(box(0.5, 0.08, 0.5, seatMaterial, 0, 0.45, 0))
-  chair.add(box(0.5, 0.55, 0.08, seatMaterial, 0, 0.75, -0.21))
+  chair.add(box(0.52, 0.09, 0.5, seatMaterial, 0, 0.45, 0))
+  chair.add(box(0.52, 0.58, 0.09, seatMaterial, 0, 0.76, -0.22))
   chair.add(box(0.08, 0.42, 0.08, m.metal, 0, 0.22, 0))
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.05, 16), m.metal)
   base.position.y = 0.03
   base.castShadow = true
   chair.add(base)
+  for (const side of [-1, 1]) {
+    chair.add(box(0.06, 0.06, 0.38, m.metal, side * 0.29, 0.66, 0.02))
+    chair.add(box(0.045, 0.2, 0.045, m.metal, side * 0.29, 0.55, 0.13))
+  }
   return chair
 }
 
@@ -122,6 +138,10 @@ function buildMonitor(m, screenMaterial, x, angle) {
   const panel = box(0.9, 0.52, 0.04, screenMaterial, 0, 1.32, -0.3)
   panel.rotation.x = -0.08
   monitor.add(panel)
+  // Small code-like lines make occupied workstations read as active screens.
+  for (const [i, width] of [0.56, 0.42, 0.62, 0.32].entries()) {
+    monitor.add(box(width, 0.018, 0.008, m.screenText, -0.35 + width / 2, 1.49 - i * 0.09, -0.272))
+  }
   monitor.position.x = x
   monitor.rotation.y = angle
   return monitor
@@ -159,6 +179,14 @@ function buildDesk(m, desk) {
     group.add(buildMonitor(m, screenMaterial, 0.62, -0.28))
   } else {
     group.add(buildMonitor(m, screenMaterial, 0, 0))
+  }
+
+  // Desk accessories keep the full nine-station layout legible as a working office.
+  group.add(box(0.62, 0.025, 0.22, m.cabinet, 0, 0.79, 0.2))
+  group.add(box(0.18, 0.02, 0.24, m.noteBlue, width / 2 - 0.34, 0.79, 0.14))
+  if (desk.main) {
+    group.add(box(0.48, 0.48, 0.7, m.cabinet, -width / 2 + 0.28, 0.48, 0))
+    group.add(box(0.49, 0.015, 0.02, m.metal, -width / 2 + 0.28, 0.56, 0.36))
   }
 
   // buildChair faces +z; the chair sits at +z and the monitors at -z, so turn it around.
@@ -371,6 +399,28 @@ function buildPlant(m, x, z) {
   return group
 }
 
+function buildWallBoards(m) {
+  const group = new THREE.Group()
+  const z = -ROOM.depth / 2 + 0.16
+  // A whiteboard and a color-coded kanban wall echo the reference image.
+  group.add(box(3.6, 1.55, 0.055, m.frame, -8.15, 2.03, z))
+  group.add(box(3.44, 1.4, 0.065, m.board, -8.15, 2.03, z + 0.04))
+  for (const [x, y, width] of [[-9.38, 2.43, 0.68], [-8.55, 2.26, 1.0], [-9.2, 1.94, 0.76], [-7.95, 1.68, 1.2]]) {
+    group.add(box(width, 0.035, 0.012, m.ink, x, y, z + 0.083))
+  }
+  group.add(box(3.65, 1.7, 0.08, m.frame, -2.45, 2.02, z))
+  group.add(box(3.5, 1.54, 0.07, m.board, -2.45, 2.02, z + 0.05))
+  for (let col = 0; col < 3; col++) {
+    const x = -3.55 + col * 1.08
+    group.add(box(0.78, 0.055, 0.012, m.ink, x, 2.57, z + 0.095))
+    for (let row = 0; row < (col === 1 ? 3 : 2); row++) {
+      const material = [m.noteBlue, m.notePink, m.noteYellow][(col + row) % 3]
+      group.add(box(0.84, 0.27, 0.025, material, x, 2.26 - row * 0.32, z + 0.104))
+    }
+  }
+  return group
+}
+
 function buildRoom(m) {
   const group = new THREE.Group()
   const { width, depth, height, wallThickness: t } = ROOM
@@ -381,8 +431,19 @@ function buildRoom(m) {
   group.add(floor)
 
   // Back and left walls only — the open sides keep the camera's view clear.
-  group.add(box(width, height, t, m.wall, 0, height / 2, -depth / 2))
-  group.add(box(t, height, depth, m.wall, -width / 2, height / 2, 0))
+  const backWall = box(width, height, t, m.wall, 0, height / 2, -depth / 2)
+  const sideWall = box(t, height, depth, m.wall, -width / 2, height / 2, 0)
+  // Large flat walls self-shadow badly under the small soft-shadow map.
+  for (const wall of [backWall, sideWall]) {
+    wall.castShadow = false
+    wall.receiveShadow = false
+    group.add(wall)
+  }
+
+  // A slim raised edge makes the room read like the open-sided miniature.
+  group.add(box(width + 0.2, 0.15, 0.18, m.wall, 0, 0.04, depth / 2))
+  group.add(box(0.18, 0.15, depth + 0.2, m.wall, width / 2, 0.04, 0))
+  group.add(buildWallBoards(m))
 
   return group
 }
@@ -405,8 +466,8 @@ export default function Office3D() {
     const materials = makeMaterials()
 
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color(0xeef1f5)
-    scene.fog = new THREE.Fog(0xeef1f5, 30, 70)
+    scene.background = new THREE.Color(0xf4f7f9)
+    scene.fog = new THREE.Fog(0xf4f7f9, 32, 72)
 
     const camera = new THREE.PerspectiveCamera(
       50,
@@ -430,8 +491,8 @@ export default function Office3D() {
     controls.maxDistance = 45
     controls.target.set(0, 1, 0)
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa3ad, 1.1))
-    const sun = new THREE.DirectionalLight(0xffffff, 1.6)
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xc4d8df, 1.55))
+    const sun = new THREE.DirectionalLight(0xffffff, 1.8)
     sun.position.set(12, 18, 10)
     sun.castShadow = true
     sun.shadow.mapSize.set(2048, 2048)
@@ -492,13 +553,14 @@ export default function Office3D() {
     pantrySeats(PANTRY.x0 + 2.6, (PANTRY.z0 + PANTRY.z1) / 2, 1.45, 4).forEach((seat, i) => {
       spots.set(`pseat:${i}`, { x: seat.x, z: seat.z, heading: seat.rotation, sit: true })
     })
+    spots.set('pantry:coffee', { x: PANTRY.x1 - 1.45, z: 4.6, heading: Math.PI / 2, sit: false })
 
     const graph = buildGraph(
       [...spots].map(([id, spot]) => ({
         id,
         x: spot.x,
         z: spot.z,
-        area: id.startsWith('mseat') ? 'meeting' : id.startsWith('pseat') ? 'pantry' : 'office',
+        area: id.startsWith('mseat') ? 'meeting' : id.startsWith('pseat') || id.startsWith('pantry:') ? 'pantry' : 'office',
       }))
     )
     const officeNodes = [...graph.nodes.values()].filter(
@@ -583,7 +645,8 @@ export default function Office3D() {
       }
       if (kind === 'desk') return person.homeNode
       if (kind === 'meeting') return freeSpot('mseat:') ?? person.homeNode
-      if (kind === 'pantry') return freeSpot('pseat:') ?? 'pantry:counter'
+      if (kind === 'coffee') return freeSpot('pantry:coffee') ?? freeSpot('pseat:') ?? person.homeNode
+      if (kind === 'break') return freeSpot('pseat:') ?? person.homeNode
       if (kind === 'wander') return officeNodes[Math.floor(Math.random() * officeNodes.length)].id
       return person.at
     }
@@ -595,7 +658,9 @@ export default function Office3D() {
       const seated = Boolean(spot.sit)
       poseSeated(person, seated)
       person.root.rotation.y = spot.heading ?? person.root.rotation.y
-      person.mode = seated ? (person.kind === 'desk' ? 'type' : 'sit') : 'stand'
+      person.mode = seated
+        ? (person.kind === 'desk' && person.status === 'working' ? 'type' : 'sit')
+        : (person.kind === 'coffee' ? 'coffee' : 'stand')
       person.busyUntil = now + person.duration
     }
 
@@ -610,6 +675,7 @@ export default function Office3D() {
       person.duration = duration
 
       const goal = targetFor(person, kind)
+      if (kind === 'coffee' && goal !== 'pantry:coffee') person.kind = 'break'
       person.goal = goal
       person.follows = person.parentDesk ? followMode(person) : null
       if (goal !== person.at && spots.has(goal)) claims.set(goal, person.key)
@@ -640,7 +706,7 @@ export default function Office3D() {
       rig.root.position.set(spot.x, 0, spot.z)
       rig.root.rotation.y = spot.heading
       poseSeated(rig, Boolean(spot.sit))
-      if (parentDesk) rig.root.scale.setScalar(0.85)
+      rig.root.scale.setScalar(parentDesk ? 1.02 : 1.18)
       // Only the session's own person speaks; subagents have no hook stream.
       const bubble = parentDesk ? null : buildBubble()
       if (bubble) rig.root.add(bubble.mesh)
@@ -694,9 +760,6 @@ export default function Office3D() {
       const look = statusLook(station.agent ? effectiveStatus(station) : 'empty')
       station.screenMaterial.emissive.setHex(look.color)
       station.screenMaterial.emissiveIntensity = look.intensity
-      people.get(deskName)?.bubble?.setText(
-        station.agent ? bubbleText(activity.get(station.agent.sessionId)) : null
-      )
     }
 
     const deskOfSession = (sessionId) => {
@@ -832,8 +895,17 @@ export default function Office3D() {
         } else if (person.mode === 'walk') {
           if (stepAlongPath(person, delta)) arrive(person, now)
         }
+        if (person.mode !== 'walk' && person.kind === 'desk' && status === 'working') {
+          person.mode = workPose(activity.get(stations.get(person.deskName).agent?.sessionId))
+        }
         animatePerson(person, person.mode, now)
-        if (person.bubble?.mesh.visible) billboardNameplate(person.bubble.mesh, camera.position)
+        if (person.bubble) {
+          const live = activity.get(stations.get(person.deskName).agent?.sessionId)
+          person.bubble.setText(status === 'working' && person.kind === 'desk'
+            ? (bubbleText(live) ?? 'working')
+            : (activityLabel(person.kind) ?? (status === 'working' ? bubbleText(live) : 'idle')))
+          if (person.bubble.mesh.visible) billboardNameplate(person.bubble.mesh, camera.position)
+        }
       }
 
       for (const station of stations.values()) {

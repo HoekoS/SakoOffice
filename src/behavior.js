@@ -7,9 +7,10 @@ export const ACTIVITIES = {
     { kind: 'meeting', weight: 1, min: 40, max: 90 },
   ],
   loose: [
-    { kind: 'pantry', weight: 3, min: 20, max: 45 },
-    { kind: 'wander', weight: 4, min: 10, max: 30 },
-    { kind: 'linger', weight: 2, min: 8, max: 20 },
+    { kind: 'coffee', weight: 3, min: 18, max: 35 },
+    { kind: 'break', weight: 3, min: 20, max: 45 },
+    { kind: 'wander', weight: 2, min: 10, max: 30 },
+    { kind: 'linger', weight: 1, min: 8, max: 20 },
   ],
 }
 
@@ -40,4 +41,21 @@ export function chooseActivity(status, rng = Math.random) {
 export function shouldRedecide(person, status, now) {
   if (person.status !== status) return true
   return now >= person.busyUntil
+}
+
+/** Give live work a readable pose even when the agent stays at the same desk. */
+export function workPose(activity) {
+  if (activity?.phase === 'thinking') return 'think'
+  if (activity?.phase === 'tool' && ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch'].includes(activity.tool)) return 'read'
+  return 'type'
+}
+
+export function activityLabel(kind) {
+  return {
+    coffee: 'making coffee',
+    break: 'on a break',
+    meeting: 'team meeting',
+    wander: 'taking a walk',
+    linger: 'taking a breather',
+  }[kind] ?? null
 }

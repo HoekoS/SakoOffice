@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chooseActivity, activitySet, shouldRedecide, ACTIVITIES } from './behavior.js'
+import { chooseActivity, activitySet, shouldRedecide, workPose, activityLabel } from './behavior.js'
 
 /** Feeds a fixed sequence of rolls, then repeats the last one. */
 const rolls = (...values) => {
@@ -19,7 +19,7 @@ test('an idle or away agent is free to roam', () => {
   for (const status of ['idle', 'away', 'anything-else']) {
     for (let roll = 0; roll < 1; roll += 0.02) {
       const { kind } = chooseActivity(status, rolls(roll, 0.5))
-      assert.ok(['pantry', 'wander', 'linger'].includes(kind), `${status} produced ${kind}`)
+      assert.ok(['coffee', 'break', 'wander', 'linger'].includes(kind), `${status} produced ${kind}`)
     }
   }
 })
@@ -27,9 +27,24 @@ test('an idle or away agent is free to roam', () => {
 test('the weights favour desk work and the roll picks each option in turn', () => {
   assert.equal(chooseActivity('working', rolls(0.1, 0)).kind, 'desk')
   assert.equal(chooseActivity('working', rolls(0.95, 0)).kind, 'meeting')
-  assert.equal(chooseActivity('idle', rolls(0.1, 0)).kind, 'pantry')
-  assert.equal(chooseActivity('idle', rolls(0.5, 0)).kind, 'wander')
+  assert.equal(chooseActivity('idle', rolls(0.1, 0)).kind, 'coffee')
+  assert.equal(chooseActivity('idle', rolls(0.5, 0)).kind, 'break')
   assert.equal(chooseActivity('idle', rolls(0.95, 0)).kind, 'linger')
+})
+
+test('working poses reflect live tools without changing the agent status', () => {
+  assert.equal(workPose({ phase: 'tool', tool: 'Read' }), 'read')
+  assert.equal(workPose({ phase: 'tool', tool: 'Grep' }), 'read')
+  assert.equal(workPose({ phase: 'tool', tool: 'Edit' }), 'type')
+  assert.equal(workPose({ phase: 'thinking' }), 'think')
+  assert.equal(workPose(undefined), 'type')
+})
+
+test('visible activity labels explain where an idle or working agent went', () => {
+  assert.equal(activityLabel('coffee'), 'making coffee')
+  assert.equal(activityLabel('break'), 'on a break')
+  assert.equal(activityLabel('meeting'), 'team meeting')
+  assert.equal(activityLabel('wander'), 'taking a walk')
 })
 
 test('a duration spans exactly its own range, never another activity\'s', () => {
